@@ -13,7 +13,7 @@ def load_data():
 df_gender, df_sum = load_data()
 
 # 지역 선택
-regions = df_gender['행정구역'].unique()
+regions = df_gender['행정기관'].unique()
 selected_region = st.selectbox("지역을 선택하세요", regions)
 
 # 연령대 슬라이더 설정
