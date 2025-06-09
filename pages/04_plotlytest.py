@@ -5,8 +5,9 @@ import plotly.express as px
 # 파일 불러오기
 @st.cache_data
 def load_data():
-    df_gender = pd.read_excel('/mnt/data/people_gender.xlsx')
-    df_sum = pd.read_excel('/mnt/data/people_sum.xlsx')
+# 파일 경로를 상대 경로로 지정
+    df_gender = pd.read_excel('people_gender.xlsx')
+    df_sum = pd.read_excel('people_sum.xlsx')
     return df_gender, df_sum
 
 df_gender, df_sum = load_data()
