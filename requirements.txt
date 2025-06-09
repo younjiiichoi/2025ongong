@@ -3,3 +3,4 @@ plotly
 streamlit-folium
 openpyxl
 pandas
+yfinance
