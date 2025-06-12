@@ -23,19 +23,19 @@ if uploaded_zip:
     # 컬럼 정리
     df.columns = df.columns.str.lower().str.strip()
 
-    if "temperature" not in df.columns or "ice cream sales" not in df.columns:
+    if "Temperature" not in df.columns or "Ice Cream Profits" not in df.columns:
         st.error("❌ 'temperature' 또는 'ice cream sales' 컬럼이 존재하지 않습니다.")
         st.stop()
 
     # 🔹 1단계: 산점도 그래프
     st.subheader("1️⃣ 기온 vs 아이스크림 판매량 산점도")
-    fig = px.scatter(df, x="temperature", y="ice cream sales", trendline="ols")
+    fig = px.scatter(df, x="Temperature", y="Ice Cream Profits", trendline="ols")
     st.plotly_chart(fig, use_container_width=True)
 
     # 🔹 적분할 함수 정의 (보간 기반)
     from scipy.interpolate import interp1d
-    x = df["temperature"].values
-    y = df["ice cream sales"].values
+    x = df["Temperature"].values
+    y = df["Ice Cream Profits"].values
     a, b = float(min(x)), float(max(x))
 
     f_interp = interp1d(x, y, kind='linear', fill_value="extrapolate")
