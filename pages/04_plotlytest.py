@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 
 # 📁 데이터 로딩
-df = pd.read_csv("data.csv", encoding="cp949")
+df = pd.read_csv("../data.csv", encoding="cp949")
 
 # 📍 지역 선택
 region = st.selectbox("📍 지역을 선택하세요", df['행정구역'].unique())
