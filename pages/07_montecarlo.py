@@ -2,104 +2,96 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import zipfile
-import io
+from scipy.interpolate import interp1d
 
 st.set_page_config(page_title="Ice Cream Monte Carlo", layout="centered")
-st.title("🍦 Ice Cream Sales & Temperature 분석")
+st.title("🍦 Ice Cream Profits & Temperature 분석")
 
-# 🔽 1. ZIP 파일에서 CSV 읽기
-uploaded_zip = st.file_uploader("📁 archive.zip 파일을 업로드하세요", type=["zip"])
+# 1️⃣ 엑셀 업로드
+uploaded_file = st.file_uploader("📁 ice_cream_data.xlsx 파일을 업로드하세요", type=["xlsx"])
 
-if uploaded_zip:
-    with zipfile.ZipFile(uploaded_zip) as archive:
-        # 첫 번째 CSV 파일 자동 선택
-        csv_name = [f for f in archive.namelist() if f.endswith(".csv")][0]
-        with archive.open(csv_name) as csv_file:
-            df = pd.read_csv(csv_file)
+if uploaded_file:
+    try:
+        df = pd.read_excel(uploaded_file)
 
-    st.success(f"✅ 파일 로드 완료: `{csv_name}`")
-    
-    # 컬럼 정리
-    df.columns = df.columns.str.lower().str.strip()
+        # 컬럼명 출력 (디버깅용)
+        st.write("✅ 컬럼명 확인:", df.columns.tolist())
 
-    if "Temperature" not in df.columns or "Ice Cream Profits" not in df.columns:
-        st.error("❌ 'temperature' 또는 'ice cream sales' 컬럼이 존재하지 않습니다.")
-        st.stop()
+        if "Temperature" not in df.columns or "Ice Cream Profits" not in df.columns:
+            st.error("❌ 'Temperature' 또는 'Ice Cream Profits' 컬럼이 존재하지 않습니다.")
+            st.stop()
 
-    # 🔹 1단계: 산점도 그래프
-    st.subheader("1️⃣ 기온 vs 아이스크림 판매량 산점도")
-    fig = px.scatter(df, x="Temperature", y="Ice Cream Profits", trendline="ols")
-    st.plotly_chart(fig, use_container_width=True)
+        # 2️⃣ 산점도 시각화
+        st.subheader("1️⃣ Temperature vs Ice Cream Profits")
+        fig = px.scatter(df, x="Temperature", y="Ice Cream Profits", trendline="ols")
+        st.plotly_chart(fig, use_container_width=True)
 
-    # 🔹 적분할 함수 정의 (보간 기반)
-    from scipy.interpolate import interp1d
-    x = df["Temperature"].values
-    y = df["Ice Cream Profits"].values
-    a, b = float(min(x)), float(max(x))
+        # 3️⃣ 보간 함수 정의
+        x = df["Temperature"].values
+        y = df["Ice Cream Profits"].values
+        a, b = float(min(x)), float(max(x))
+        f_interp = interp1d(x, y, kind='linear', fill_value="extrapolate")
+        real_area = np.trapz(y, x)
 
-    f_interp = interp1d(x, y, kind='linear', fill_value="extrapolate")
+        N = 10000  # 샘플 수
+        results = {}
 
-    # 실제 넓이 (근사 기준값)
-    real_area = np.trapz(y, x)
+        st.subheader("2️⃣ 몬테카를로 적분 (3가지 샘플링 방식)")
 
-    N = 10000  # 샘플 수
-    results = {}
+        # (1) Uniform Sampling
+        x1 = np.random.uniform(a, b, N)
+        area1 = (b - a) * np.mean(f_interp(x1))
+        error1 = abs(area1 - real_area)
+        results["Uniform"] = {"value": area1, "error": error1}
 
-    st.subheader("2️⃣ 몬테카를로 적분 (3가지 난수 알고리즘 사용)")
+        # (2) Stratified Sampling
+        strata = np.linspace(a, b, N + 1)
+        mids = (strata[:-1] + strata[1:]) / 2
+        area2 = (b - a) / N * np.sum(f_interp(mids))
+        error2 = abs(area2 - real_area)
+        results["Stratified"] = {"value": area2, "error": error2}
 
-    # 1. Uniform Sampling
-    x1 = np.random.uniform(a, b, N)
-    area1 = (b - a) * np.mean(f_interp(x1))
-    error1 = abs(area1 - real_area)
-    results["Uniform"] = {"value": area1, "error": error1}
+        # (3) Importance Sampling
+        u = np.random.uniform(0, 1, N)
+        x3 = a + (b - a) * np.sqrt(u)
+        p_x = 2 * (x3 - a) / (b - a)**2
+        w = f_interp(x3) / p_x
+        area3 = np.mean(w)
+        error3 = abs(area3 - real_area)
+        results["Importance"] = {"value": area3, "error": error3}
 
-    # 2. Stratified Sampling
-    strata = np.linspace(a, b, N + 1)
-    mids = (strata[:-1] + strata[1:]) / 2
-    area2 = (b - a) / N * np.sum(f_interp(mids))
-    error2 = abs(area2 - real_area)
-    results["Stratified"] = {"value": area2, "error": error2}
+        # 결과 테이블 정리
+        result_df = pd.DataFrame([
+            {"Algorithm": k, "Estimated Area": v["value"], "Absolute Error": v["error"]}
+            for k, v in results.items()
+        ]).sort_values("Absolute Error")
 
-    # 3. Importance Sampling (ex: p(x) ~ (x-a)/(b-a)^2)
-    u = np.random.uniform(0, 1, N)
-    x3 = a + (b - a) * np.sqrt(u)
-    p_x = 2 * (x3 - a) / (b - a)**2
-    w = f_interp(x3) / p_x
-    area3 = np.mean(w)
-    error3 = abs(area3 - real_area)
-    results["Importance"] = {"value": area3, "error": error3}
+        st.table(result_df.style.format({"Estimated Area": "{:.2f}", "Absolute Error": "{:.4f}"}))
 
-    # 결과 표
-    result_df = pd.DataFrame([
-        {"Algorithm": k, "Estimated Area": v["value"], "Absolute Error": v["error"]}
-        for k, v in results.items()
-    ]).sort_values("Absolute Error")
+        # 4️⃣ 오차 최소 알고리즘 설명
+        best = result_df.iloc[0]["Algorithm"]
+        st.subheader("3️⃣ 오차가 가장 작은 알고리즘: " + f"**{best} Sampling**")
 
-    st.table(result_df.style.format({"Estimated Area": "{:.2f}", "Absolute Error": "{:.4f}"}))
+        if best == "Uniform":
+            explanation = """
+            Uniform Sampling은 전체 구간에서 균등하게 난수를 생성해 함수 평균을 계산합니다.  
+            단순하지만 데이터 분포가 불균형할 경우 오차가 클 수 있습니다.
+            """
+        elif best == "Stratified":
+            explanation = """
+            Stratified Sampling은 전체 구간을 동일한 간격으로 나누고, 각 구간의 중앙값을 샘플링하여
+            더 고르게 데이터를 대표합니다. 불균형 데이터 분포에 강합니다.
+            """
+        elif best == "Importance":
+            explanation = """
+            Importance Sampling은 함수가 클 가능성이 높은 구간에서 더 많이 샘플링하여 오차를 줄이는 기법입니다.  
+            확률 밀도에 따라 샘플의 중요도를 조정하여 더 효율적인 적분을 수행합니다.
+            """
 
-    # 🔹 3단계: 오차 최소 알고리즘 설명
-    best = result_df.iloc[0]["Algorithm"]
-    st.subheader("3️⃣ 오차가 가장 작은 알고리즘: " + f"**{best} Sampling**")
+        st.markdown(f"🧠 **{best} Sampling의 원리 요약:**\n\n{explanation.strip()}")
 
-    if best == "Uniform":
-        explanation = """
-        Uniform Sampling은 전체 구간에서 균등하게 난수를 생성해 함수 값을 평균냅니다. 
-        단순하지만 특정 구간에 데이터가 집중되어 있는 경우에는 정확도가 떨어질 수 있습니다.
-        """
-    elif best == "Stratified":
-        explanation = """
-        Stratified Sampling은 구간을 N등분하고 각 구간의 중심값을 샘플링합니다. 
-        이를 통해 전체 영역을 고르게 대표하며, 특히 데이터가 균등 분포되지 않은 경우에도 안정적인 추정을 제공합니다.
-        """
-    elif best == "Importance":
-        explanation = """
-        Importance Sampling은 함수 값이 클 것으로 예상되는 구간에서 더 많은 샘플을 뽑는 전략입니다. 
-        확률 밀도 함수(p(x))를 기반으로 가중치를 조절하며 오차를 줄입니다. 
-        특히 함수가 특정 구간에서 급격히 변할 때 효과적입니다.
-        """
-
-    st.markdown(f"🧠 **{best} Sampling의 논리:**\n\n{explanation.strip()}")
+    except Exception as e:
+        st.error(f"❌ 파일 처리 중 오류 발생: {e}")
 
 else:
-    st.info("📂 ZIP 파일을 먼저 업로드해 주세요. (CSV 내부에 'temperature'와 'ice cream sales' 컬럼 필요)")
+    st.info("📂 엑셀 파일을 먼저 업로드해 주세요. ('Temperature', 'Ice Cream Profits' 컬럼 필요)")
