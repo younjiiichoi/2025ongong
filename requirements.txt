@@ -6,3 +6,6 @@ pandas
 yfinance
 numpy
 plotly.express
+scikit-learn
+matplotlib
+networkx
