@@ -1,21 +1,19 @@
 import streamlit as st
 import pandas as pd
+import heapq
 from sklearn.linear_model import LinearRegression
-from collections import deque
 import networkx as nx
 import matplotlib.pyplot as plt
 
 # 페이지 설정
 st.set_page_config(page_title="직업 위험도 분석", layout="wide")
-
 st.title("🤖 직업 자동화 위험도 분석 앱")
 
 # -----------------------------
-# 1. 데이터 불러오기 및 전처리
+# 1. 데이터 불러오기 및 병합
 # -----------------------------
 @st.cache_data
 def load_data():
-    # 예시 위험도 데이터
     job_risk_data = {
         "job": [
             "속기사", "행정사", "취업알선원", "한식조리사", "중식조리사",
@@ -31,32 +29,26 @@ def load_data():
         ]
     }
     job_risk_df = pd.DataFrame(job_risk_data)
-
-    # 직업 분류 파일 (사전 업로드되어 있어야 함)
     job_detail_df = pd.read_csv("직업세세분류.CSV", encoding="euc-kr")
-
-    # 병합
     merged = pd.merge(job_detail_df, job_risk_df, left_on="KNOW직업명", right_on="job")
-
     return merged
 
 merged_df = load_data()
 
 # -----------------------------
-# 2. 회귀분석: 직업소분류 코드 → 평균 위험도
+# 2. 직업명 기반 평균 위험도 및 회귀분석
 # -----------------------------
-grouped_df = merged_df.groupby("KNOW직업소분류")["risk_score"].mean().reset_index()
+grouped_df = merged_df.groupby("KNOW직업명")["risk_score"].mean().reset_index()
 grouped_df.rename(columns={"risk_score": "avg_risk_score"}, inplace=True)
+grouped_df["job_index"] = grouped_df.index
 
-# 회귀분석
-X = grouped_df[["KNOW직업소분류"]]
+X = grouped_df[["job_index"]]
 y = grouped_df["avg_risk_score"]
 reg = LinearRegression().fit(X, y)
-
 grouped_df["predicted_risk"] = reg.predict(X)
 
 # -----------------------------
-# 3. 위험도 탐색 및 정렬
+# 3. 위험도 정렬 + 슬라이더 필터
 # -----------------------------
 st.sidebar.header("🎚️ 위험도 필터")
 min_risk, max_risk = st.sidebar.slider("위험도 범위 선택", 0.0, 1.0, (0.0, 1.0), 0.05)
@@ -65,40 +57,44 @@ filtered = merged_df[(merged_df["risk_score"] >= min_risk) & (merged_df["risk_sc
 sorted_data = filtered.sort_values(by="risk_score", ascending=False)
 
 st.subheader("📋 직업별 위험도 데이터")
-st.dataframe(sorted_data[["KNOW직업명", "KNOW직업소분류", "risk_score"]].reset_index(drop=True), use_container_width=True)
+st.dataframe(sorted_data[["KNOW직업명", "risk_score"]].reset_index(drop=True), use_container_width=True)
 
 # -----------------------------
-# 4. 보조금 신청 대기열 (Queue)
+# 4. 보조금 신청 (우선순위 큐)
 # -----------------------------
-st.subheader("💰 보조금 신청 대기열")
+st.subheader("💰 보조금 신청 대기열 (위험도 높은 순 처리)")
 
-if "queue" not in st.session_state:
-    st.session_state.queue = deque()
+if "priority_queue" not in st.session_state:
+    st.session_state.priority_queue = []
 
 col1, col2 = st.columns([2, 1])
 with col1:
     selected_job = st.selectbox("신청할 직업 선택", merged_df["KNOW직업명"].unique())
     if st.button("신청하기"):
-        st.session_state.queue.append(selected_job)
-        st.success(f"{selected_job} 신청 완료!")
+        job_row = merged_df[merged_df["KNOW직업명"] == selected_job]
+        if not job_row.empty:
+            risk = float(job_row["risk_score"].values[0])
+            heapq.heappush(st.session_state.priority_queue, (-risk, selected_job))
+            st.success(f"{selected_job} 신청 완료!")
 
 with col2:
     if st.button("1명 처리"):
-        if st.session_state.queue:
-            done = st.session_state.queue.popleft()
-            st.info(f"✅ {done} 처리 완료")
+        if st.session_state.priority_queue:
+            _, job_name = heapq.heappop(st.session_state.priority_queue)
+            st.info(f"✅ {job_name} 처리 완료")
         else:
             st.warning("대기열이 비어있어요.")
 
-if st.session_state.queue:
-    st.markdown("**📦 현재 대기열**")
-    for i, job in enumerate(st.session_state.queue, 1):
-        st.write(f"{i}. {job}")
+if st.session_state.priority_queue:
+    st.markdown("**📦 현재 대기열 (위험도 순)**")
+    sorted_queue = sorted(st.session_state.priority_queue, reverse=True)
+    for i, (risk, job) in enumerate(sorted_queue, 1):
+        st.write(f"{i}. {job} (위험도: {-risk:.2f})")
 else:
     st.write("🚫 대기 중인 신청 없음")
 
 # -----------------------------
-# 5. 전직 가능성 그래프 시각화
+# 5. 전직 가능성 그래프
 # -----------------------------
 st.subheader("🔄 전직 가능성 그래프")
 
@@ -113,18 +109,14 @@ G.add_edges_from([
 
 plt.figure(figsize=(7, 5))
 pos = nx.spring_layout(G, seed=42)
-nx.draw_networkx_nodes(G, pos, node_color='skyblue', node_size=2000)
+nx.draw_networkx_nodes(G, pos, node_color='lightblue', node_size=2000)
 nx.draw_networkx_edges(G, pos, edge_color='gray')
 nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold')
 plt.axis("off")
 st.pyplot(plt)
 
 # -----------------------------
-# 6. 회귀분석 결과 시각화
+# 6. 회귀분석 시각화 테이블
 # -----------------------------
-st.subheader("📈 직업군별 평균 위험도 vs 회귀 예측값")
-st.dataframe(grouped_df.rename(columns={
-    "KNOW직업소분류": "직업군코드",
-    "avg_risk_score": "평균 위험도",
-    "predicted_risk": "예측 위험도"
-}), use_container_width=True)
+st.subheader("📈 직업별 평균 위험도 vs 회귀 예측값")
+st.dataframe(grouped_df[["KNOW직업명", "avg_risk_score", "predicted_risk"]], use_container_width=True)
